@@ -1564,3 +1564,755 @@ int main(int argc, char* argv[]) {
 
 
 # 4-进程
+
+进程标识符 pid （ps）
+
+​	类型pid_t
+
+​	进程号是顺次向下使用(不是优先使用当前最小的)
+
+​	getpid, getppid()
+
+进程的产生
+
+​	fork
+
+​		父子进程区别：返回值， pid， ppid，未决信号和文件锁不继承，资源利用量归0
+
+​	init进程：1号，是所有进程的祖先进程
+
+​	vfork
+
+进程的消亡及释放资源
+
+exec函数族
+
+用户权限及组权限
+
+观摩课： 解释器文件
+
+system
+
+进程会计
+
+进程时间
+
+守护进程
+
+系统日志
+
+
+
+## 4-1 fork示例
+
+```c
+#include <sys/types.h>
+#include <unistd.h>
+pid_t fork(void);
+```
+
+当心缓冲区哟
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+int main(int argc, char* argv[]) {
+    pid_t pid;
+    printf("[%d]begin!\n", getpid());
+    fflush(NULL); // 否则 ./a.out > /tmp/out begin会打印两次，输出在缓冲区中，fork之后复制两份
+
+    pid = fork();
+    if (pid < 0) {
+        perror("fork()");
+        exit(1);
+    }
+    else if (pid == 0) {
+        printf("[%d] child\n", getpid());
+    }
+    else {
+        printf("[%d] parent\n", getpid());
+    }
+
+    printf("[%d] : end\n", getpid());
+ //   getchar();    ps axf  查看进程关系
+    return 0;
+}
+```
+
+
+
+父子进程小关系
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define  LEFT  30000000
+#define  RIGHT 30000200
+int main(int argc, char* argv[]) {
+    int i, j, mark;
+    pid_t pid;
+    for (i = LEFT; i <= RIGHT; i++) {
+        mark = 1;
+        pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            exit(1);
+        }
+        if (pid == 0) {
+            for (j = 2; j < i / 2; j++) {
+                if (i % j == 0) {
+                    mark = 0;
+                    break;
+                }
+            }
+            if (mark)
+                printf("%d is a primer\n", i);
+            // sleep(1000); 孤儿和僵尸
+            exit(0);
+        }
+    }
+    return 0;
+} // 和一个进程算质数比较时间 time ./a.out > /tmp/null
+```
+
+
+
+vfork：
+
+## 4-2 wait和waitpid
+
+```c
+#include <sys/types.h>
+#include <sys/wait.h>
+pid_t wait(int *wstatus);  // 死等
+pid_t waitpid(pid_t pid, int *wstatus, int options); // 第三参数最吊
+```
+
+交叉分配求质数： 0号进程永远没有质数 （分块，池， 交叉）
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+
+#define  LEFT  30000000
+#define  RIGHT 30000200
+#define N      3
+int main(int argc, char* argv[]) {
+    int i, j, mark;
+    pid_t pid;
+    int n;
+    for (n = 0; n < N; n++) {
+        pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            exit(1);
+        }
+        if (pid == 0) {
+            for (i = LEFT+n; i <= RIGHT; i+=N) {
+                mark = 1;
+
+                for (j = 2; j < i / 2; j++) {
+                    if (i % j == 0) {
+                        mark = 0;
+                        break;
+                    }
+                }
+                if (mark)
+                    printf("[%d]%d is a primer\n", n, i);
+            }
+            exit(0);
+        }
+    }
+    for (n = 0; n < N; n++)
+        wait(NULL);
+
+    return 0;
+}
+```
+
+
+
+## 4-3 exec
+
+子进程干别的喽
+
+注意 fflush
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+
+
+int main(int argc, char* argv[]) {
+    puts("Begin!");
+    fflush(NULL); // !!!!!!!!!!!!!!!!!
+    int ret;
+    ret = execl("/usr/bin/date", "date", "+%s", NULL);
+    perror("execl");
+    exit(1);
+//    if (ret == -1) {
+//        perror("execl");
+//        exit(1);
+//    }
+    puts("End!");
+    return 0;
+}
+```
+
+
+
+execl有用版本
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+
+
+int main(int argc, char* argv[]) {
+    puts("Begin!");
+    fflush(NULL); // !!!!!!!!!!!!!!!!!
+    pid_t  pid;
+
+    pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(1);
+    }
+    if (pid == 0) {
+        execl("/usr/bin/date", "date", "+%s", NULL);
+      //  execl("/usr/bin/sleep", "httpd", "100", NULL);  低级伪造 httpd是argv[0]
+        perror("execl");
+        exit(1);
+    }
+    wait(NULL);
+    puts("End!");
+    return 0;
+}
+```
+
+
+
+## 4-4 实现shell
+
+
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+#include <glob.h>
+#define DELIMS " \t\n"
+struct cmd_st {
+    glob_t globres;
+};
+static void prompt() {
+    printf("mysh-0.1$");
+}
+static void parse(char* line, cmd_st *res) {
+    char* tok;
+    int i = 0;
+    while (1) {
+       tok = strsep(&line, DELIMS);
+       if (tok == NULL)   // tok为空，表示到了line尾部
+           break;
+       if (tok[0] == '\0') // 表示line中有多个分隔符组成的元素。
+           continue;
+
+       glob(tok, GLOB_NOCHECK | GLOB_APPEND*i, NULL, &res->globres);  //开始是随机内容，第一次不追加
+       i = 1;
+    }
+}
+int main(int argc, char* argv[]) {
+    cmd_st cmd;
+    char *linebuf = NULL;
+    size_t linebuf_size = 0;
+    pid_t pid;
+    while (1) {
+        prompt();
+
+        if (getline(&linebuf, &linebuf_size, stdin) < 0 )
+            break;
+
+        parse(linebuf, &cmd);
+
+        if (0) {
+
+        }
+        else {  // 外部命令
+            pid = fork();
+            if  (pid < 0) {
+                perror("fork()");
+                exit(1);
+            }
+            if (pid == 0) {
+                execvp(cmd.globres.gl_pathv[0], cmd.globres.gl_pathv);
+                perror("exec");
+                exit(1);
+            }
+            else {
+                wait(NULL);
+            }
+        }
+    }
+    return 0;
+}
+```
+
+```
+新建一个用户 修改它的shell ： sudo vim /etc/passwd  改修最后一个字段
+cp ~/a.out /usr/local/bin/mysh
+aaa:x:1001:1001::/home/aaa:/usr/local/bin/mysh
+
+```
+
+
+
+## 4-5 用户权限和组权限
+
+linux世界就是fork+exec+wait
+
+​	u+s g+s
+
+```bash
+pig@DESKTOP-GTLOVQ2 ~> ls -l /usr/bin/passwd                                       (base)
+-rwsr-xr-x 1 root root 59976  3月 14  2022 /usr/bin/passwd
+```
+
+```c
+#include <unistd.h>
+#include <sys/types.h>
+
+uid_t getuid(void);
+uid_t geteuid(void);
+
+gid_t getgid(void);
+gid_t getegid(void);
+
+int setuid(uid_t uid);
+int setgid(gid_t gid);
+
+int setreuid(uid_t ruid, uid_t euid);  // 原子操作
+int setregid(gid_t rgid, gid_t egid);
+
+int seteuid(uid_t euid);
+int setegid(gid_t egid);
+```
+
+
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+
+int main(int argc, char* argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage..\n");
+        exit(1);
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(1);
+    }
+    if (pid == 0) {
+        setuid(atoi(argv[1]));  // 并不是想改成谁就可以
+        execvp(argv[2], argv + 2);
+        perror("exec");
+        exit(1);
+    }
+    wait(NULL);
+    return 0;
+}
+```
+
+```bash
+pig@DESKTOP-GTLOVQ2 /test> chown root a.out                                        (base)
+chown: 正在更改'a.out' 的所有者: 不允许的操作
+pig@DESKTOP-GTLOVQ2 /test [1]> sudo chown root a.out                               (base)
+pig@DESKTOP-GTLOVQ2 /test> chmod u+s a.out                                         (base)
+chmod: 正在更改 'a.out' 的权限: 不允许的操作
+pig@DESKTOP-GTLOVQ2 /test [1]> sudo chmod u+s a.out                                (base)
+pig@DESKTOP-GTLOVQ2 /test> ls -l a.out                                             (base)
+-rwsr-xr-x 1 root root 16424 12月  1 19:49 a.out
+pig@DESKTOP-GTLOVQ2 /test> ./a.out 0 cat /etc/shadow
+```
+
+
+
+## 4-6 观摩课：解释器文件
+
+脚本文件
+
+```shell
+#!bin/sh              第一句话只要可执行文件就ok ps： #!/bin/cat
+ls
+whoami
+cat /etc/shadow
+ps
+```
+
+```
+(base) pig@DESKTOP-GTLOVQ2:~$ ./t.sh   # 用cat解释这个文件
+#!/usr/bin/cat
+
+ls
+whoami
+pwd
+```
+
+碰到傻逼老板，把自己shell指定为top命令，啥也不能干
+
+
+
+## 4-7 system()
+
+```c
+#include <stdlib.h>
+
+int system(const char *command);
+```
+
+
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+
+int main(int argc, char* argv[]) {
+
+    system("date +%s > /tmp/out");
+ //   execl("/bin/sh", "sh", "-c", "date +%s", NULL);
+    return 0;
+}
+```
+
+
+
+
+
+## 4-8 进程会计
+
+​	
+
+```c
+#include <unistd.h>
+
+int acct(const char *filename);
+clock_t times(struct tms *buf);
+```
+
+
+
+## 4-9 守护进程
+
+会话session  一个成功的shell登录可以模拟成一个会话？
+
+终端
+
+一个命令后面加& 表示放在后台运行
+
+```c
+#include <sys/types.h>
+#include <unistd.h>
+
+pid_t setsid(void);
+
+       int setpgid(pid_t pid, pid_t pgid);
+       pid_t getpgid(pid_t pid);
+
+       pid_t getpgrp(void);                 /* POSIX.1 version */
+       pid_t getpgrp(pid_t pid);            /* BSD version */
+
+       int setpgrp(void);                   /* System V version */
+       int setpgrp(pid_t pid, pid_t pgid);  /* BSD version */
+```
+
+
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+#define FNAME "/tmp/out"
+static int daemonize(void) {
+    pid_t pid;
+    pid = fork();
+    int fd;
+    if (pid < 0) {
+        perror("fork");
+        return -1;
+    }
+    if (pid > 0)
+        exit(0);
+    open("/dev/null", O_RDWR);
+    if (fd < 0) {
+        perror("open()");
+        return -1;
+    }
+    dup2(fd, 0);
+    dup2(fd, 1);
+    dup2(fd, 2);
+    if (fd > 2)
+        close(fd);
+    setsid();
+    chdir("/");
+    return 0;
+}
+int main(int argc, char* argv[]) {
+    FILE *fp;
+    if (daemonize())
+        exit(1);
+    int i;
+    fp = fopen(FNAME, "w");
+    if (fp == NULL) {
+        perror("fopen()");
+        exit(1);
+    }
+    for (i = 0; ; i++) {
+        fprintf(fp, "%d\n", i);
+        fflush(fp);
+        sleep(1);
+    }
+    return 0;
+}  // ps ajx 看一下 ppid 1 pid gid sid 一样
+```
+
+
+
+## 4-10 系统日志
+
+cd /var/log/
+
+syslogd服务
+
+```c
+#include <syslog.h>
+
+void openlog(const char *ident, int option, int facility);
+void syslog(int priority, const char *format, ...);
+void closelog(void);
+
+void vsyslog(int priority, const char *format, va_list ap);
+```
+
+
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <wait.h>
+#include <syslog.h>
+#include <errno.h>
+#define FNAME "/tmp/out"
+static int daemonize(void) {
+    pid_t pid;
+    pid = fork();
+    int fd;
+    if (pid < 0) {
+        return -1;
+    }
+    if (pid > 0)
+        exit(0);
+    open("/dev/null", O_RDWR);
+    if (fd < 0) {
+        return -1;
+    }
+    dup2(fd, 0);
+    dup2(fd, 1);
+    dup2(fd, 2);
+    if (fd > 2)
+        close(fd);
+    setsid();
+    chdir("/");
+    return 0;
+}
+int main(int argc, char* argv[]) {
+    FILE *fp;
+    int i;
+
+    openlog("mydaemon", LOG_PID, LOG_DAEMON);
+
+    if (daemonize()) {
+        syslog(LOG_ERR, "dameonize fialed!");
+        exit(1);
+    }
+    else {
+        syslog(LOG_INFO, "dameonizer() succedssed!");
+    }
+    fp = fopen(FNAME, "w");
+    if (fp == NULL) {
+        syslog(LOG_ERR, "fopen:%s", strerror(errno));
+        exit(1);
+    }
+    syslog(LOG_INFO, "%s was opened", FNAME);
+    for (i = 0; ; i++) {
+        fprintf(fp, "%d\n", i);
+        fflush(fp);
+        syslog(LOG_DEBUG, "%d is print", i);
+        sleep(1);
+    }
+    fclose(fp);
+    closelog();
+    return 0;
+} // 查看ubuntu系统日志在哪里   tail -f看一下
+```
+
+
+
+# 5-并发与信号
+
+
+
+2， signal()
+
+3,  信号的不可靠，
+
+4，可重入函数
+
+5， 信号的响应过程
+
+6， 信号常用函数
+
+​	kill， raise， alarm， pause， abort， system，sleep
+
+7， 信号集
+
+8， 信号屏蔽字/pending的处理
+
+9， 扩展
+
+​		sigsuspend
+
+​		sigaction
+
+​		setitimer
+
+10， 实时信号
+
+
+
+## 5-1 基本信号
+
+同步：
+
+异步
+
+​	异步事件的处理：查询法， 通知法    按照异步事件发生的频率选择， 没有严格意义上的通知法。
+
+比如钓鱼不用漂，一直刷竿看有没有鱼。假设有漂(通知法)，漂动了才甩起来，也要一直看着漂，不然鱼来了也不知道。
+
+
+
+1， 什么是信号
+
+​	信号是软件中断。信号的响应依赖于中断。
+
+```c
+#include <signal.h> // kill -l 查看所有信号 core：出错现场 
+
+typedef void (*sighandler_t)(int);
+
+sighandler_t signal(int signum, sighandler_t handler);
+```
+
+
+
+忽略信号
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <signal.h>
+
+void sig_handler(int s) {
+    write(1, "!", 1);
+}
+
+int main(int argc, char* argv[]) {
+    int i;
+    //  signal(SIGINT, SIG_IGN);  // SIG_IGN, SIG_DFL, or function
+    signal(SIGINT, sig_handler);
+    for (i = 0; i < 10; i++) {
+        write(1, "*", 1);
+        sleep(1); // 一直ctrl+c 信号会打断阻塞的系统调用
+    }
+    return 0;
+}
+```
+
+
+
+## 5-2 可重入函数
+
+​		所有的系统调用都是可重入的，一部分库函数也是可重入的，如：memcpy
+
+​		信号从收到到响应有一个不可避免的延迟
+
+​		思考：如何忽略掉一个信号的？
+
+​					标准信号为什么要丢失？
+
+​					标准信号的响应没有严格的顺序
+
